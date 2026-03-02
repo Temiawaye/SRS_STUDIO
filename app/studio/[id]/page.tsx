@@ -8,7 +8,7 @@ import { Bot, FileText, CheckCircle } from 'lucide-react';
 export default function StudioPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [userPrompt, setUserPrompt] = useState('');
-  
+
   // 1. The Editor: Handles "Collaborative Editing" 
   const editor = useEditor({
     extensions: [StarterKit],
@@ -25,12 +25,13 @@ export default function StudioPage() {
   const handleGenerate = async () => {
     setIsGenerating(true);
     try {
-      const res = await fetch('/api/generate', {
+      const res = await fetch('/api/chat/generate', {
         method: 'POST',
-        body: JSON.stringify({ prompt: userPrompt }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userPrompt }),
       });
       const data = await res.json();
-      
+
       // Append AI content to the editor
       if (editor) {
         editor.commands.insertContent(data.content);
