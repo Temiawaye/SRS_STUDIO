@@ -1,19 +1,12 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 :root {
   --background: #ffffff;
   --foreground: #171717;
   --brand-blue: #2563eb;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* Pure dark minimalist theme */
-    --background: #212121;
-    --foreground: #ececec;
-    --gray-bg: #2f2f2f;
-    --gray-border: rgba(255, 255, 255, 0.1);
-  }
+  --gray-bg: #f9fafb;
+  --gray-border: rgba(0, 0, 0, 0.1);
 }
 
 body {

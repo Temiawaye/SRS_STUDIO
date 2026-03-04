@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getPromptForTemplate, srsGenerationSystemPrompt, chatSystemPrompt } from "@/lib/prompts";
 
 // Standard Hugging Face Router Endpoint
 const API_URL = "https://router.huggingface.co/v1/chat/completions";
@@ -7,21 +8,25 @@ const API_URL = "https://router.huggingface.co/v1/chat/completions";
 
 export async function POST(req: Request) {
   try {
-    const { message, templateType = "full_srs" } = await req.json();
+    const { message, templateType = "chat", history = [] } = await req.json();
 
-    // 1. Incorporating Project-Specific System Prompting 
-    // We enforce the quality gate directly in the system instructions.
-    const systemPrompt = `
-      You are an expert Product Manager AI agent.
-      Your goal is to generate a Software Requirement Specification (SRS) that is:
-      1. Unambiguous: Use precise language to avoid misinterpretation. 
-      2. Complete: Include all necessary functional and non-functional requirements. 
-      3. Consistent: Ensure no requirements contradict each other. 
-      4. Traceable: Align every requirement with a business objective. 
+    const isChat = templateType === "chat";
+    const systemPrompt = isChat ? chatSystemPrompt : srsGenerationSystemPrompt;
 
-      Use Chain-of-Thought reasoning to first analyze the user's intent, then structure the documentation 
-      following industry standards. 
-    `;
+    // Map history to HF's required format for context
+    const formattedHistory = history.map((msg: { role: string, content: string }) => ({
+        role: msg.role === "bot" ? "assistant" : msg.role,
+        content: msg.content
+    }));
+
+    const messages = [
+        { role: "system", content: systemPrompt },
+        ...formattedHistory,
+        { 
+          role: "user", 
+          content: getPromptForTemplate(templateType, message)
+        }
+    ];
 
     const response = await fetch(process.env.API_URL || "https://router.huggingface.co/v1/chat/completions", {
       method: "POST",
@@ -30,18 +35,10 @@ export async function POST(req: Request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        // Using DeepSeek-V3 as proposed for its strong reasoning capabilities  
         model: "deepseek-ai/DeepSeek-V3", 
-        messages: [
-          { role: "system", content: systemPrompt },
-          { 
-            role: "user", 
-            content: `Generate a ${templateType} for the following project: ${message}` 
-          }
-        ],
-        // Increased max_tokens as SRS documents are detailed and lengthy 
-        max_tokens: 2000, 
-        temperature: 0.3, // Lower temperature for technical, consistent output 
+        messages: messages,
+        max_tokens: isChat ? 1000 : 2000, 
+        temperature: isChat ? 0.7 : 0.3, 
       }),
     });
 

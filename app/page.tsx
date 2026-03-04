@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Sparkles, MessageSquare, Plus, Menu, X, Trash2, Activity } from "lucide-react";
+import { Send, Bot, Sparkles, MessageSquare, Plus, Menu, Trash2, Activity } from "lucide-react";
 import Link from "next/link";
+import { Editor } from "@/components/Editor";
+import { TemplateSelector, TemplateOption } from '@/components/TemplateSelector';
+import { marked } from "marked";
 
 type Message = {
   role: "user" | "bot";
@@ -14,7 +17,10 @@ type ChatSession = {
   title: string;
   messages: Message[];
   updatedAt: number;
+  editorContent?: string;
 };
+
+const DEFAULT_EDITOR_CONTENT = '<h2>Software Requirement Specification</h2><p>Your generated content will appear here...</p>';
 
 export default function Home() {
   const [input, setInput] = useState("");
@@ -26,6 +32,10 @@ export default function Home() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
+  // Editor State
+  const [editorContent, setEditorContent] = useState(DEFAULT_EDITOR_CONTENT);
+  const [templateType, setTemplateType] = useState<TemplateOption>('full_srs');
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Load from local storage on mount
@@ -35,11 +45,11 @@ export default function Home() {
       try {
         const parsed = JSON.parse(saved) as ChatSession[];
         setSessions(parsed);
-        // Load the most recent session if exists
         if (parsed.length > 0) {
           const mostRecent = parsed.sort((a, b) => b.updatedAt - a.updatedAt)[0];
           setCurrentSessionId(mostRecent.id);
           setMessages(mostRecent.messages);
+          setEditorContent(mostRecent.editorContent || DEFAULT_EDITOR_CONTENT);
         }
       } catch (e) {
         console.error("Failed to parse sessions", e);
@@ -47,7 +57,6 @@ export default function Home() {
     }
   }, []);
 
-  // Save to local storage whenever sessions change significantly
   const saveSessions = (updatedSessions: ChatSession[]) => {
     setSessions(updatedSessions);
     localStorage.setItem("chat_sessions", JSON.stringify(updatedSessions));
@@ -57,6 +66,7 @@ export default function Home() {
     setMessages([]);
     setCurrentSessionId(null);
     setInput("");
+    setEditorContent(DEFAULT_EDITOR_CONTENT);
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
@@ -65,6 +75,7 @@ export default function Home() {
     if (session) {
       setCurrentSessionId(session.id);
       setMessages(session.messages);
+      setEditorContent(session.editorContent || DEFAULT_EDITOR_CONTENT);
       if (window.innerWidth < 768) setIsSidebarOpen(false);
     }
   };
@@ -95,9 +106,9 @@ export default function Home() {
     setInput("");
     setIsLoading(true);
 
-    // If this is the very first message of a new session, create it immediately
     let sessionId = currentSessionId;
     let currentSessions = sessions;
+    let newEditorContent = editorContent;
 
     if (!sessionId) {
       sessionId = crypto.randomUUID();
@@ -107,14 +118,14 @@ export default function Home() {
         title: input.slice(0, 30) + (input.length > 30 ? "..." : ""),
         messages: newMessages,
         updatedAt: Date.now(),
+        editorContent: newEditorContent,
       };
       currentSessions = [newSession, ...sessions];
       saveSessions(currentSessions);
     } else {
-      // Update existing session with user message
       currentSessions = sessions.map(s =>
         s.id === sessionId
-          ? { ...s, messages: newMessages, updatedAt: Date.now() }
+          ? { ...s, messages: newMessages, updatedAt: Date.now(), editorContent: newEditorContent }
           : s
       );
       saveSessions(currentSessions);
@@ -124,7 +135,11 @@ export default function Home() {
       const response = await fetch("/api/chat/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: input }),
+        body: JSON.stringify({
+          message: input,
+          templateType: templateType,
+          history: messages.slice(-10)
+        }),
       });
 
       const data = await response.json();
@@ -132,10 +147,15 @@ export default function Home() {
       const finalMessages = [...newMessages, botMessage];
       setMessages(finalMessages);
 
-      // Update session with bot message
+      if (data.reply) {
+        const parsedReply = await marked.parse(data.reply);
+        newEditorContent = newEditorContent + parsedReply;
+        setEditorContent(newEditorContent);
+      }
+
       const finalSessions = currentSessions.map(s =>
         s.id === sessionId
-          ? { ...s, messages: finalMessages, updatedAt: Date.now() }
+          ? { ...s, messages: finalMessages, updatedAt: Date.now(), editorContent: newEditorContent }
           : s
       );
       saveSessions(finalSessions);
@@ -150,41 +170,40 @@ export default function Home() {
   };
 
   return (
-    <main className="flex h-screen bg-[#212121] text-[#ececec] font-sans antialiased overflow-hidden">
-
+    <main className="flex h-screen bg-gray-50 text-gray-900 font-sans antialiased overflow-hidden">
       {/* Mobile Sidebar Overlay */}
       {isSidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          className="fixed inset-0 bg-black/20 z-40 md:hidden backdrop-blur-sm"
           onClick={() => setIsSidebarOpen(false)}
         />
       )}
 
       {/* Sidebar for checking past prompts/chats */}
-      <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#171717] transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isSidebarOpen ? "translate-x-0" : "-translate-x-full"} flex flex-col`}>
-        <div className="p-3 flex flex-col gap-2">
+      <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-white transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isSidebarOpen ? "translate-x-0" : "-translate-x-full"} flex flex-col border-r border-gray-200 shadow-sm`}>
+        <div className="p-4 flex flex-col gap-3">
           <button
             onClick={startNewChat}
-            className="flex items-center gap-2 w-full px-3 py-2.5 bg-transparent hover:bg-[#2f2f2f] rounded-lg border border-white/10 text-[14px] font-medium transition-colors"
+            className="flex items-center gap-3 w-full px-4 py-3 bg-white hover:bg-gray-50 rounded-xl border border-gray-200 text-[14px] font-medium transition-all shadow-sm text-gray-700 hover:text-gray-900"
           >
-            <div className="bg-white/10 rounded-full p-1 border border-white/20">
+            <div className="bg-gray-100 rounded-full p-1 border border-gray-200 text-gray-600">
               <Plus className="w-4 h-4" />
             </div>
             New Chat
           </button>
           <Link
             href="/evaluate"
-            className="flex items-center gap-2 w-full px-3 py-2.5 bg-transparent hover:bg-purple-900/30 text-purple-400 rounded-lg border border-purple-500/20 text-[14px] font-medium transition-colors"
+            className="flex items-center gap-3 w-full px-4 py-3 bg-indigo-50/50 hover:bg-indigo-50 text-indigo-700 rounded-xl border border-indigo-100 text-[14px] font-medium transition-all shadow-sm"
           >
-            <div className="bg-purple-500/10 rounded-full p-1 border border-purple-500/20">
+            <div className="bg-indigo-100/50 rounded-full p-1 border border-indigo-200 text-indigo-600">
               <Activity className="w-4 h-4" />
             </div>
             Evaluate SRS
           </Link>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-3 pb-4">
-          <div className="text-xs font-semibold text-gray-500 mb-2 mt-4 px-2 uppercase tracking-wider">
+        <div className="flex-1 overflow-y-auto px-4 pb-4 custom-scrollbar">
+          <div className="text-xs font-semibold text-gray-400 mb-3 mt-4 px-1 uppercase tracking-wider">
             Past Prompts
           </div>
           <div className="space-y-1">
@@ -192,17 +211,17 @@ export default function Home() {
               <div key={session.id} className="relative group">
                 <button
                   onClick={() => loadSession(session.id)}
-                  className={`flex items-center gap-3 w-full px-2 py-2 pr-8 rounded-lg text-left text-[14px] truncate transition-colors ${currentSessionId === session.id
-                    ? "bg-[#2f2f2f] text-gray-100"
-                    : "hover:bg-[#2f2f2f] text-gray-400"
+                  className={`flex items-center gap-3 w-full px-3 py-2.5 pr-8 rounded-lg text-left text-[14px] truncate transition-colors ${currentSessionId === session.id
+                    ? "bg-gray-100 text-gray-900 font-medium"
+                    : "hover:bg-gray-50 text-gray-600"
                     }`}
                 >
-                  <MessageSquare className="w-4 h-4 flex-shrink-0" />
+                  <MessageSquare className={`w-4 h-4 flex-shrink-0 ${currentSessionId === session.id ? 'text-indigo-500' : 'text-gray-400'}`} />
                   <span className="truncate">{session.title}</span>
                 </button>
                 <button
                   onClick={(e) => deleteSession(e, session.id)}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all rounded-md hover:bg-white/5"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded-md hover:bg-red-50"
                   title="Delete Chat"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -210,121 +229,150 @@ export default function Home() {
               </div>
             ))}
             {sessions.length === 0 && (
-              <div className="px-2 text-[13px] text-gray-500 italic">No past prompts yet.</div>
+              <div className="px-3 py-2 text-[13px] text-gray-400 italic">No past prompts yet.</div>
             )}
           </div>
         </div>
       </div>
 
-      {/* Main Chat Content */}
-      <div className="flex-1 flex flex-col h-full min-w-0 relative">
-        {/* Header/Top Bar */}
-        <header className="flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-white/10 bg-[#212121]/95 backdrop-blur-sm z-10 sticky top-0 md:bg-transparent md:border-none">
-          <div className="flex items-center gap-3">
-            <button
-              className="md:hidden p-1.5 -ml-1.5 text-gray-400 hover:text-white rounded-md hover:bg-white/10"
-              onClick={() => setIsSidebarOpen(true)}
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-            <div className="flex items-center gap-2 md:hidden">
-              <Bot className="w-5 h-5 text-gray-300" />
-              <h1 className="text-[15px] font-medium tracking-tight text-gray-200">
-                Hugging Face Assistant
-              </h1>
-            </div>
-          </div>
-        </header>
+      {/* Main Content Area (Split Pane) */}
+      <div className="flex-1 flex flex-col md:flex-row h-full min-w-0 relative">
 
-        {/* Main Chat Area */}
-        <div className="flex-1 overflow-y-auto px-4 sm:px-0">
-          {messages.length === 0 ? (
-            // Empty State
-            <div className="h-full flex flex-col items-center justify-center animate-fade-in text-center px-4">
-              <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mb-5 ring-1 ring-white/10">
-                <Sparkles className="w-6 h-6 text-gray-400" />
+        {/* Left Side: Chat Interface */}
+        <div className="flex-1 flex flex-col h-full border-r border-gray-200 relative w-full md:w-1/2 bg-white">
+          {/* Header/Top Bar */}
+          <header className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-white/95 backdrop-blur-md z-10 sticky top-0">
+            <div className="flex items-center gap-3">
+              <button
+                className="md:hidden p-2 -ml-2 text-gray-500 hover:text-gray-900 rounded-lg hover:bg-gray-100 transition-colors"
+                onClick={() => setIsSidebarOpen(true)}
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+              <div className="flex items-center gap-2.5">
+                <div className="bg-indigo-50 p-1.5 rounded-lg border border-indigo-100">
+                  <Bot className="w-5 h-5 text-indigo-600" />
+                </div>
+                <h1 className="text-[16px] font-semibold tracking-tight text-gray-800">
+                  SRS Assistant
+                </h1>
               </div>
-              <h2 className="text-xl font-semibold mb-2 text-gray-100">How can I help you today?</h2>
-              <p className="text-[15px] text-gray-400 max-w-sm">
-                I can assist you with answering questions, drafting emails, brainstorming, and writing code.
-              </p>
             </div>
-          ) : (
-            // Messages List
-            <div className="w-full max-w-3xl mx-auto py-8">
-              {messages.map((msg, index) => (
-                <div
-                  key={index}
-                  className={`py-6 flex gap-4 w-full animate-fade-in group ${msg.role === "user" ? "justify-end" : "justify-start"
-                    }`}
-                >
-                  {msg.role === "bot" && (
-                    <div className="flex-shrink-0 w-8 h-8 rounded-full border border-white/10 flex items-center justify-center bg-[#2f2f2f]">
-                      <Sparkles className="w-4 h-4 text-gray-300" />
+            {/* Added Template Selector to header */}
+            <TemplateSelector
+              selectedTemplate={templateType}
+              onChange={setTemplateType}
+            />
+          </header>
+
+          {/* Main Chat Area */}
+          <div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 custom-scrollbar bg-gray-50/30">
+            {messages.length === 0 ? (
+              // Empty State
+              <div className="h-full flex flex-col items-center justify-center animate-fade-in text-center px-4">
+                <div className="w-14 h-14 rounded-2xl bg-white shadow-sm flex items-center justify-center mb-6 border border-gray-100">
+                  <Sparkles className="w-7 h-7 text-indigo-500" />
+                </div>
+                <h2 className="text-xl font-semibold mb-3 text-gray-900">Let's write a product requirement.</h2>
+                <p className="text-[15px] text-gray-500 max-w-sm leading-relaxed">
+                  Describe what you want to build, and I'll generate technical specifications on the right.
+                </p>
+              </div>
+            ) : (
+              // Messages List
+              <div className="w-full py-8 max-w-3xl mx-auto">
+                {messages.map((msg, index) => (
+                  <div
+                    key={index}
+                    className={`py-6 flex gap-4 w-full animate-fade-in group ${msg.role === "user" ? "justify-end" : "justify-start"
+                      }`}
+                  >
+                    {msg.role === "bot" && (
+                      <div className="flex-shrink-0 w-8 h-8 rounded-full border border-gray-200 flex items-center justify-center bg-white shadow-sm mt-1">
+                        <Sparkles className="w-4 h-4 text-indigo-500" />
+                      </div>
+                    )}
+
+                    <div className={`max-w-[85%] text-[15px] leading-relaxed ${msg.role === "user"
+                      ? "bg-indigo-600 px-5 py-3.5 rounded-2xl rounded-tr-sm text-white shadow-sm font-medium"
+                      : "text-gray-700 pt-1"
+                      }`}>
+                      {msg.content}
                     </div>
-                  )}
-
-                  <div className={`max-w-[85%] sm:max-w-[75%] text-[15.5px] leading-relaxed ${msg.role === "user"
-                    ? "bg-[#2f2f2f] px-5 py-3.5 rounded-2xl rounded-tr-[4px] text-gray-100 shadow-sm"
-                    : "text-gray-200 pt-0.5"
-                    }`}>
-                    {msg.content}
                   </div>
-                </div>
-              ))}
+                ))}
 
-              {/* Loading Indicator */}
-              {isLoading && (
-                <div className="py-6 flex gap-4 w-full justify-start animate-fade-in">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full border border-white/10 flex items-center justify-center bg-[#2f2f2f]">
-                    <Sparkles className="w-4 h-4 text-gray-300" />
+                {/* Loading Indicator */}
+                {isLoading && (
+                  <div className="py-6 flex gap-4 w-full justify-start animate-fade-in">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full border border-gray-200 flex items-center justify-center bg-white shadow-sm mt-1">
+                      <Sparkles className="w-4 h-4 text-indigo-500" />
+                    </div>
+                    <div className="flex items-center h-8 gap-1 pl-1 pt-1">
+                      <div className="w-2 h-2 bg-gray-300 rounded-full typing-dot" />
+                      <div className="w-2 h-2 bg-gray-300 rounded-full typing-dot" />
+                      <div className="w-2 h-2 bg-gray-300 rounded-full typing-dot" />
+                    </div>
                   </div>
-                  <div className="flex items-center h-8 gap-1 pl-1">
-                    <div className="w-1.5 h-1.5 bg-gray-400 rounded-full typing-dot" />
-                    <div className="w-1.5 h-1.5 bg-gray-400 rounded-full typing-dot" />
-                    <div className="w-1.5 h-1.5 bg-gray-400 rounded-full typing-dot" />
-                  </div>
-                </div>
-              )}
+                )}
 
-              {/* Spacer for bottom input to avoid overlap */}
-              <div className="h-40" ref={messagesEndRef} />
+                {/* Spacer for bottom input to avoid overlap */}
+                <div className="h-36" ref={messagesEndRef} />
+              </div>
+            )}
+          </div>
+
+          {/* Floating Input Area */}
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-white via-white/95 to-transparent pt-10 pb-6 px-4 sm:px-6 lg:px-8">
+            <div className="w-full max-w-3xl mx-auto relative flex items-end bg-white rounded-2xl border border-gray-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500/50">
+              <textarea
+                className="w-full bg-transparent text-gray-900 placeholder-gray-400 rounded-2xl pl-5 pr-14 py-4 max-h-[200px] min-h-[56px] focus:outline-none resize-none leading-relaxed text-[15px]"
+                placeholder="Describe your product feature..."
+                rows={1}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  e.target.style.height = 'auto';
+                  e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                  }
+                }}
+                disabled={isLoading}
+              />
+              <button
+                onClick={sendMessage}
+                disabled={isLoading || !input.trim()}
+                className="absolute right-3 bottom-3 p-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:bg-gray-100 disabled:text-gray-400 disabled:hover:bg-gray-100 transition-all flex items-center justify-center h-10 w-10 shadow-sm"
+              >
+                <Send className="w-4 h-4 ml-0.5" />
+              </button>
             </div>
-          )}
+            <p className="text-center text-[11px] text-gray-400 mt-3 hidden sm:block font-medium">
+              Assistant can make mistakes. Verify technical specs before using.
+            </p>
+          </div>
         </div>
 
-        {/* Floating Input Area */}
-        <div className="fixed bottom-0 left-0 right-0 md:left-64 bg-gradient-to-t from-[#212121] via-[#212121]/90 to-transparent pt-8 pb-6 px-4">
-          <div className="max-w-3xl mx-auto relative flex items-end bg-[#2f2f2f] rounded-3xl border border-white/5 shadow-[0_0_20px_rgba(0,0,0,0.3)] transition-all focus-within:ring-1 focus-within:ring-gray-400/50">
-            <textarea
-              className="w-full bg-transparent text-gray-100 placeholder-gray-500 rounded-3xl pl-5 pr-14 py-4 max-h-[200px] min-h-[56px] focus:outline-none resize-none leading-relaxed text-[15px]"
-              placeholder="Generate a SRS for the following project: "
-              rows={1}
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                e.target.style.height = 'auto';
-                e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  sendMessage();
-                }
-              }}
-              disabled={isLoading}
-            />
-            <button
-              onClick={sendMessage}
-              disabled={isLoading || !input.trim()}
-              className="absolute right-3 bottom-3 p-1.5 rounded-full bg-white text-black hover:bg-gray-200 disabled:opacity-30 disabled:bg-white disabled:hover:bg-white transition-colors flex items-center justify-center h-8 w-8"
-            >
-              <Send className="w-4 h-4 mr-0.5" />
-            </button>
-          </div>
-          <p className="text-center text-xs text-gray-500 mt-3 hidden sm:block">
-            Assistant can make mistakes. Consider verifying important information.
-          </p>
+        {/* Right Side: Document Editor */}
+        <div className="hidden md:flex flex-1 w-1/2 flex-col h-full bg-gray-50/50">
+          <Editor
+            content={editorContent}
+            onUpdate={(content) => {
+              setEditorContent(content);
+              // Also update session editor state on manual type
+              if (currentSessionId) {
+                const updatedSessions = sessions.map(s =>
+                  s.id === currentSessionId ? { ...s, editorContent: content } : s
+                );
+                setSessions(updatedSessions);
+                localStorage.setItem("chat_sessions", JSON.stringify(updatedSessions));
+              }
+            }}
+          />
         </div>
       </div>
     </main>

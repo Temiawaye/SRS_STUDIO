@@ -1,21 +1,11 @@
 import { NextResponse } from "next/server";
+import { srsEvaluationPrompt } from "@/lib/prompts";
 
 export async function POST(req: Request) {
   try {
     const { srsContent } = await req.json();
 
-    const evaluationPrompt = `
-      You are an AI Quality Auditor specialized in Requirements Engineering.
-      Your task is to evaluate the following Software Requirement Specification (SRS) based on industry standards (IEEE/ISO).
-      
-      Evaluate the text for:
-      1. **Completeness**: Are there missing functional or non-functional requirements? [cite: 77]
-      2. **Clarity/Ambiguity**: Identify phrases that are vague or open to multiple interpretations. [cite: 95]
-      3. **Consistency**: Check for contradictory requirements. [cite: 77]
-      4. **Traceability**: Assess if requirements align with potential business goals. 
-
-      Structure your response as a report with a "Quality Score" (0-100) and specific "Actionable Recommendations" for improvement.
-    `;
+    const evaluationPrompt = srsEvaluationPrompt;
 
     const response = await fetch(process.env.API_URL || "https://router.huggingface.co/v1/chat/completions", {
       method: "POST",
@@ -24,7 +14,7 @@ export async function POST(req: Request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "deepseek-ai/DeepSeek-V3", 
+        model: "deepseek-ai/DeepSeek-V3",
         messages: [
           { role: "system", content: evaluationPrompt },
           { role: "user", content: `Please evaluate this SRS content: ${srsContent}` }
