@@ -1,72 +1,36 @@
 import { NextResponse } from "next/server";
-import { getPromptForTemplate, srsGenerationSystemPrompt, chatSystemPrompt } from "@/lib/prompts";
-
-// Standard Hugging Face Router Endpoint
-const API_URL = "https://router.huggingface.co/v1/chat/completions";
-
-
+import { LLM_Agent_Manager } from "@/lib/ai-agent";
 
 export async function POST(req: Request) {
   try {
     const { message, templateType = "chat", history = [] } = await req.json();
 
-    const isChat = templateType === "chat";
-    const systemPrompt = isChat ? chatSystemPrompt : srsGenerationSystemPrompt;
+    const agentManager = new LLM_Agent_Manager();
+    
+    // Convert generic text message into RequirementInput domain model
+    const requirementInput = {
+      requirementID: crypto.randomUUID(), // Mock ID 
+      description: message
+    };
 
-    // Map history to HF's required format for context
-    const formattedHistory = history.map((msg: { role: string, content: string }) => ({
-        role: msg.role === "bot" ? "assistant" : msg.role,
-        content: msg.content
-    }));
-
-    const messages = [
-        { role: "system", content: systemPrompt },
-        ...formattedHistory,
-        { 
-          role: "user", 
-          content: getPromptForTemplate(templateType, message)
-        }
-    ];
-
-    const response = await fetch(process.env.API_URL || "https://router.huggingface.co/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.HF_ACCESS_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "deepseek-ai/DeepSeek-V3", 
-        messages: messages,
-        max_tokens: isChat ? 1000 : 2000, 
-        temperature: isChat ? 0.7 : 0.3, 
-      }),
-    });
-
-    if (response.status === 503) {
-      return NextResponse.json(
-        { error: "Model is warming up. Please wait 30 seconds and try again." }, 
-        { status: 503 }
-      );
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      return NextResponse.json(
-        { error: `API Error: ${response.status} - ${errorText}` }, 
-        { status: response.status }
-      );
-    }
-
-    const result = await response.json();
-    const reply = result.choices[0].message.content;
+    const reply = await agentManager.generateSRS(requirementInput, history, templateType);
 
     return NextResponse.json({ reply });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("AI-SRS Studio Server Error:", error);
+    
+    if (error.message.includes("warming up")) {
+      return NextResponse.json(
+        { error: error.message }, 
+        { status: 503 }
+      );
+    }
+    
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
+
 
 // export async function POST(req: Request) {
 //   try {
